@@ -1,0 +1,614 @@
+---
+title: "Penguen Analiz Raporu"
+author: "MeryemB"
+date: "08/12/2025"
+output:
+  html_document:
+    toc: true
+    theme: flatly
+    code_folding: show
+    dev: jpeg 
+---
+
+```{r Gerekli paketler}
+packages <- c(
+ "tidyverse", # dplyr, ggplot2 vb.
+ "skimr", # özet EDA
+ "VIM", # kayıp veri görselleştirme
+ "GGally", # ggpairs
+ "psych", # describe
+ "car", # varsayım testleri (Levene, VIF)
+ "rstatix" ,
+ "readr"# istatistiksel testler, kolay sözdizimi
+)
+
+
+install_if_needed <- function(pkgs) {
+ new_pkgs <- pkgs[!(pkgs %in% installed.packages()[, "Package"])]
+ if (length(new_pkgs) > 0) install.packages(new_pkgs)
+}
+install_if_needed(packages)
+library(tidyverse)
+library(skimr)
+library(VIM)
+library(GGally)
+library(psych)
+library(car)
+library(rstatix)
+
+```
+
+
+```{r Veri Okuma }
+penguins <- read.csv("C:/Users/meryembakir/Downloads/penguins.csv")
+penguins <- penguins %>%
+ mutate(
+ species = factor(species),
+ island = factor(island),
+ sex = factor(sex),
+ year = factor(year)
+ )
+glimpse(penguins) #glimpse of us şarkısı gibi bakış anlamına geliyor,,
+
+```
+```{r Genel özet istatistikler}
+skim(penguins)
+```
+```{r Sayısal değişkenler için özet}
+penguins %>%
+ select(where(is.numeric)) %>%
+ summary()
+```
+```{r  psych::describe ile daha detaylı}
+penguins %>%
+ select(where(is.numeric)) %>%
+ psych::describe()
+```
+ Temel dağılım grafikleri (sayısal değişkenler)
+```{r Histogramlar}
+num_vars <- penguins %>% select(where(is.numeric)) %>% names()
+
+for (v in num_vars) {
+ print(
+ ggplot(penguins, aes_string(x = v)) +
+ geom_histogram(bins = 30, na.rm = TRUE) +
+ labs(title = paste("Histogram -", v))
+ )
+}
+```
+
+```{r Boxplotlar}
+#Amacı: Verideki merkez eğilimi, yayılımı ve aykırı değerleri (outliers) görmek
+for (v in num_vars) {
+ print(
+ ggplot(penguins, aes(x = "", y = .data[[v]])) +
+ geom_boxplot(na.rm = TRUE) +
+ labs(title = paste("Boxplot -", v), x = "")
+ )
+}
+```
+2. Türlere göre tanımlayıcı istatistikler
+```{r  türlere göre özetler}
+penguins_num_by_species <- penguins %>%
+ group_by(species) %>%
+ summarise(
+ across(
+ where(is.numeric),
+ list(
+ n = ~sum(!is.na(.)),
+ mean = ~mean(., na.rm = TRUE),
+ sd = ~sd(., na.rm = TRUE),
+ min = ~min(., na.rm = TRUE),
+ q1 = ~quantile(., 0.25, na.rm = TRUE),
+ med = ~median(., na.rm = TRUE),
+ q3 = ~quantile(., 0.75, na.rm = TRUE),
+ max = ~max(., na.rm = TRUE)
+ ),
+ .names = "{.col}_{.fn}"
+ )
+ )
+penguins_num_by_species
+```
+```{r ture gore boxplot ve violin plot}
+#Bu türler arası farkları görsel olarak görmek ve sınıflandırma için hangi değişkenlerin ayırıcı olabileceğini anlamak için ideal.
+
+# Örn. vücut ağırlığı
+ggplot(penguins, aes(x = species, y = body_mass_g, fill = species)) +
+ geom_boxplot(na.rm = TRUE, alpha = 0.7) +
+ labs(title = "Trlere Gre Vcut Agirligi (g)", x = "Tur", y = "Vucut Agirligi (g)") +
+ theme(legend.position = "none")
+#aşağıda just vücut ağırlığını değil hepsini yapalım
+```
+```{r}
+# Tüm sayısal değişkenler için tür bazlı boxplot döngüsü
+for (v in num_vars) {
+ print(
+ ggplot(penguins, aes(x = species, y = .data[[v]], fill = species)) +
+ geom_boxplot(na.rm = TRUE) +
+ labs(
+ title = paste("Trlere Gore", v),
+ x = "Tur",
+ y = v
+ ) +
+ theme(legend.position = "none")
+ )
+}
+```
+```{r Tür x Ada}
+#Burada island , sex , year gibi değişkenler var.
+
+penguins %>%
+ count(species, island) %>%
+ group_by(species) %>%
+ mutate(pct = n / sum(n) * 100) %>%
+ arrange(species, desc(pct))
+
+ggplot(penguins, aes(x = island, fill = species)) +
+ geom_bar(position = "dodge") +
+ labs(title = "Ada ve Tur dagilimi", x = "Ada", y = "Gozlem Sayısı")
+```
+```{r # Tür x Cinsiyet}
+# Tür x Cinsiyet
+penguins %>%
+ count(species, sex) %>%
+ group_by(species) %>%
+ mutate(pct = n / sum(n) * 100) %>%
+ arrange(species, desc(pct))
+
+ggplot(penguins, aes(x = sex, fill = species)) +
+ geom_bar(position = "dodge", na.rm = TRUE) +
+ labs(title = "Cinsiyet ve Tr Dagilimi", x = "Cinsiyet", y = "Gzlem Sayisi")
+
+```
+Gentoo: Yalnızca Biscoe Adası'nda bulunur.
+
+Chinstrap: Yalnızca Dream Adası'nda bulunur.
+
+Adelie: Torgersen, Dream ve Biscoe adalarında dağılmıştır.
+
+
+Sonuç: Ada değişkeni, Gentoo ve Chinstrap'i tek başına ayırmak için mükemmeldir.
+
+
+Her üç türde de kadın (female) ve erkek (male) sayıları birbirine oldukça yakındır (yaklaşık %50-%50), ancak Gentoo ve Adelie'de eksik cinsiyet bilgisi olan gözlemler vardır (empty: 11 toplamda). 
+
+
+Sonuç: Cinsiyet, türleri ayırt etmede (sınıflandırmada) tek başına güçlü bir değişken değildir.
+
+
+
+
+
+
+Amacımız: Veri temizleme ve modelleme adımlarından önce, eksik değerlerin yapısını (Missingness Pattern) anlamaktır.
+
+Kayıp veri analizi (VIM ile
+
+Kayıp değer özetleri
+```{r kayıp sayısı ve oranı}
+penguins %>%
+ summarise(across(everything(), ~sum(is.na(.)))) %>%
+ pivot_longer(everything(), names_to = "variable", values_to = "n_missing") %>%
+ mutate(
+ pct_missing = n_missing / nrow(penguins) * 100
+ ) %>%
+ arrange(desc(pct_missing))
+```
+ VIM ile görselleştirme
+```{r}
+penguins_df <- as.data.frame(penguins)
+
+# 1) Genel eksiklik yapısı
+VIM::aggr(
+ penguins_df,
+ numbers = TRUE,
+ sortVars = TRUE,
+ labels = names(penguins_df),
+ cex.axis = 0.7,
+ gap = 3,
+ combined = TRUE,
+ cex.numbers = 0.7
+)
+```
+```{r kayip veri patterni}
+VIM::matrixplot(penguins_df)
+```
+ İsterseniz marginplot ile iki değişken arasındaki kayıplara da bakabilirsiniz:
+```{r}
+VIM::marginplot(penguins_df[, c("body_mass_g", "bill_length_mm")])
+```
+5. Sınıflandırma için kullanılabilecek EDA analizleri
+
+Burada amaç: türleri hangi değişkenler ayrıştırıyor, hangi kombinasyonlar daha iyi ayırıcı gibi.
+
+```{r Pairplot }
+num_for_classif <- penguins %>%
+ select(bill_length_mm, bill_depth_mm,
+ flipper_length_mm, body_mass_g, species) %>%
+ drop_na()
+GGally::ggpairs(
+ num_for_classif,
+ aes(color = species, alpha = 0.7),
+ columns = 1:4 # sayisal
+ 
+)
+```
+Amacı: Tüm sayısal değişken çiftleri arasındaki korelasyonu, her değişkenin dağılımını (histogram) ve tür bazında serpilme grafiğini (scatterplot) tek bir matris grafikte görselleştirmek.
+
+flipper_length_mm ve body_mass_g: Aralarında çok yüksek pozitif korelasyon vardır (Genel Corr: 0.871). 
+
+
+bill_length_mm ve body_mass_g: Orta-yüksek pozitif korelasyon (Genel Corr: 0.595). 
+
+Serpilme Grafikleri: Asıl önemli olan, grafiğin alt yarısındaki serpilme grafikleridir. Burası, farklı renklerin (türlerin) ne kadar ayrıştığını gösterir. Bu grafikler, neredeyse tüm değişken çiftlerinin türleri mükemmel bir şekilde ayırdığını gösterir (özellikle Gentoo, Adelie ve Chinstrap üçgen şeklinde ayrılır)
+
+
+
+
+
+ 5.2. Yoğunluk grafikleri (density) türlere göre
+ Amacı: Her değişkenin türler arasındaki dağılımının ne kadar çakıştığını görselleştirmek
+```{r}
+for (v in num_vars) {
+ print(
+ ggplot(penguins, aes(x = .data[[v]], fill = species)) +
+ geom_density(alpha = 0.4, na.rm = TRUE) +
+ labs(
+ title = paste("Türlere Göre Dağılım -", v),
+ x = v,
+ y = "Yoğunluk"
+ )
+ )
+}
+```
+bill_depth_mm : Gentoo (mavi) ve Adelie/Chinstrap (kırmızı/yeşil) dağılımları arasında çok az çakışma vardır. Adelie ve Chinstrap ise önemli ölçüde çakışır. 
+
+flipper_length_mm ve body_mass_g : Gentoo, diğer iki türden net bir şekilde ayrılmıştır (sağ tarafa kaymıştır). Adelie ve Chinstrap, bu değişkenlerde de birbirine daha yakındır, ancak yine de ayrışma mevcuttur.
+
+
+```{r Korelasyon matrisi}
+penguins %>%
+ select(where(is.numeric)) %>%
+ cor(use = "pairwise.complete.obs") %>%
+ round
+```
+```{r}
+library(reshape2)
+```
+ 
+```{r}
+cor_mat <- penguins %>%
+ select(where(is.numeric)) %>%
+ cor(use = "pairwise.complete.obs")
+cor_long <- reshape2::melt(cor_mat)
+ggplot(cor_long, aes(Var1, Var2, fill = value)) +
+ geom_tile() +
+ geom_text(aes(label = round(value, 2))) +
+ scale_fill_gradient2(limits = c(-1, 1)) +
+ labs(title = "Korelasyon Matrisi") +
+ theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Uyarı: flipper_length_mm ve body_mass_g arasındaki yüksek korelasyon (0.87), bu iki değişkeni aynı regresyon modelinde kullanırken çoklu doğrusal bağlantı (multicollinearity) sorununa yol açabileceği konusunda uyarı verir (Bölüm 7'de kontrol edilecektir).
+
+
+ 
+ 6. Ağırlık (body_mass_g) için basit doğrusal regresyon
+Örneğin body_mass_g ~ flipper_length_mm 
+
+Amacımız: Vücut ağırlığını (body_mass_g), tek bir güçlü tahmin edici (flipper_length_mm) kullanarak modellemek.
+```{r}
+# Basit doğrusal regresyon: vücut ağırlığı ~ kanat uzunluğu
+lm_simple <- lm(body_mass_g ~ flipper_length_mm, data = penguins)
+summary(lm_simple)
+```
+R-kare (Model Açıklama Gücü): Multiple R-squared: 0.759. Bu, kanat uzunluğunun, vücut ağırlığındaki varyasyonun yaklaşık %76'sını tek başına açıkladığı anlamına gelir. Bu, güçlü bir modeldir
+
+Yorum: Kanat uzunluğu 1 mm arttığında, vücut ağırlığı ortalama 49.686 gram artar. Bu ilişki istatistiksel olarak anlamlıdır.
+
+
+ 
+ 
+```{r}
+# Regresyon doğrusunun grafiği
+ggplot(penguins, aes(x = flipper_length_mm, y = body_mass_g)) +
+ geom_point(na.rm = TRUE) +
+ geom_smooth(method = "lm", se = TRUE, na.rm = TRUE) +
+ labs(
+ title = "Basit Doğrusal Regresyon: Vücut Ağırlığı ~ Kanat Uzunluğu",
+ x = "Flipper Length (mm)",
+ y = "Body Mass (g)"
+ )
+```
+Verilerin mavi regresyon doğrusu etrafında yoğunlaştığını, ancak özellikle türlerin ayrıldığı yerlerde (sol alt ve sağ üst kümeler) modelin sapmalarının (artıkların) olduğunu gösterir.
+
+
+ 
+ Basit model için varsayım kontrolleri
+ Amacı: Doğrusal regresyonun temel varsayımlarını (Normallik, Varyans Homojenliği, Bağımsızlık) kontrol etmek
+```{r}
+par(mfrow = c(1, 1))
+plot(lm_simple)
+```
+ 
+Artıkların Normalliği (Shapiro-Wilk 
+```{r}
+par(mfrow = c(1, 1))
+shapiro.test(residuals(lm_simple))
+#p-value = 0.1123>0.05 old Bu, artıkların normal dağıldığını varsayabiliriz
+```
+Q-Q Residuals Grafiği: Noktaların büyük ölçüde düz çizgi üzerinde olması da bu durumu destekler.
+
+
+Varyans Homojenliği (Scale-Location Grafiği): Artıkların yayılımı (fitted values'a karşı) düz bir çizgi etrafında rasgele dağılmış görünüyor, bu da varyansın homojen olduğunu gösterir.
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+Çoklu doğrusal regresyon (body_mass_g için)
+
+Örnek model: body_mass_g ~ bill_length_mm + bill_depth_mm + flipper_length_mm + species
+ 
+ Amacımız: Vücut ağırlığını (body_mass_g), birden fazla sayısal ve kategorik tahmin edici kullanarak modellemek.
+ 
+ 
+```{r}
+library(dplyr)
+penguins_reg <- penguins %>%
+ select(body_mass_g, bill_length_mm, bill_depth_mm,
+  flipper_length_mm, species) %>%
+ drop_na()
+lm_multi <- lm(
+ body_mass_g ~ bill_length_mm + bill_depth_mm +
+  flipper_length_mm + species,
+ data = penguins_reg
+)
+summary(lm_multi)
+```
+ R-kare (Model Açıklama Gücü): Multiple R-squared: 0.8471. Çoklu regresyon modelinin açıklama gücü %84.7'ye yükselmiştir. Tek değişkenli modele göre daha iyidir
+ 
+ Tüm değişkenler (türler dahil) istatistiksel olarak anlamlıdır (p-value'lar çok düşüktür). 
+
+
+speciesGentoo katsayısı: 934.887. Adelie (referans tür) ile aynı diğer özelliklere sahip bir Gentoo penguenin, Adelie'den ortalama 934.887 gram daha ağır olduğu anlamına gelir.
+
+speciesChinstrap katsayısı: -513.247. Chinstrap'in, Adelie'den ortalama 513.247 gram daha hafif olduğu anlamına gelir.
+
+
+
+
+
+
+ 
+ 
+ 
+ 
+Çoklu Varsayım Kontrolleri ve Çoklu Doğrusal Bağlantı (VIF)
+```{r Grafik diagnostikleri}
+par(mfrow = c(1, 1))
+plot(lm_multi)
+```
+Çoklu regresyon modeliniz (lm_multi), görsel teşhis grafikleri açısından oldukça sağlam görünmektedir:
+
+Doğrusallık sağlanmış.
+
+Artıkların normalliği sağlanmış.
+
+Varyans homojenliği kabul edilebilir.
+
+Modeli bozan etkili gözlem yok  
+  
+  
+  
+  
+```{r}
+par(mfrow = c(1, 1))
+# Artıkların normalliği
+shapiro.test(residuals(lm_multi))
+```
+```{r}
+# Çoklu doğrusal bağlantı (multicollinearity)
+car::vif(lm_multi)
+
+```
+VIF Amacı: Modeldeki bağımsız değişkenlerin birbiriyle ne kadar ilişkili olduğunu (çoklu doğrusal bağlantı) ölçer. VIF > 5 uyarı, VIF > 10 ciddi sorun demektir. 
+
+
+Yorum: Tüm sayısal değişkenlerin VIF değerleri 5'in üzerindedir (bill_length_mm: 5.22, bill_depth_mm: 4.79, flipper_length_mm: 6.51). 
+
+Sonuç: Modelde yüksek korelasyonlu değişkenler bulunduğundan dolayı çoklu doğrusal bağlantı uyarısı mevcuttur. Bu, katsayıların yorumlanmasını ve kararlılığını etkileyebilir.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Türlerin ikili istatistiksel karşılaştırmaları + varsayım
+bozulumları
+
+Burada tipik olarak türler arasında bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g gibi değişkenlerin
+ortalamaları karşılaştırılır.
+
+
+Amacımız: Türler arasında body_mass_g ortalamaları arasında istatistiksel olarak anlamlı bir fark olup olmadığını test etmek.
+```{r}
+# Örnek: body_mass_g için ANOVA
+# Yalnızca tam gözlemler
+penguins_mass <- penguins %>%
+ select(species, body_mass_g) %>%
+ drop_na()
+# Varsayımlar: normallik ve varyans homojenliği
+# 1) Artıkların normalliği (ANOVA sonrası bakmak daha sağlıklı ama öncesi de kabaca)
+anova_mass <- aov(body_mass_g ~ species, data = penguins_mass)
+summary(anova_mass)
+```
+F value: 343.6, p-value: <2e-16 ***.
+
+Yorum: P-değeri 0.05'ten çok küçük olduğu için, H0 reddedilir. Penguen türlerinin vücut ağırlığı ortalamaları arasında istatistiksel olarak anlamlı bir fark vardır
+
+
+
+```{r}
+# Artıkların normalliği
+shapiro.test(residuals(anova_mass))
+```
+ 
+```{r}
+# Tür bazında normallik (daha detaylı bakmak için)
+penguins_mass %>%
+ group_by(species) %>%
+ shapiro_test(body_mass_g)
+```
+ 
+```{r}
+# 2) Varyans homojenliği (Levene testi)
+car::leveneTest(body_mass_g ~ species, data = penguins_mass)
+```
+ Eğer normallik ve varyans homojenliği kabul edilebilir ise: → ANOVA + Tukey HSD ile ikili karşılaştırma:
+ 
+```{r}
+anova_mass <- aov(body_mass_g ~ species, data = penguins_mass)
+summary(anova_mass)
+```
+```{r}
+TukeyHSD(anova_mass)
+
+```
+Tukey HSD Post-hoc Testi
+Amacı: ANOVA'nın "fark var" dediği durumda, hangi tür çiftleri arasında fark olduğunu kesinleştirmek
+Gentoo-Adelie (p.:0.0000000)  Fark var.
+Gentoo-Chinstrap (p.: 0.0000000) Fark var.
+Chinstrap-Adelie (p.: 0.8806666) Fark yok
+
+Sonuç: Gentoo, hem Adelie'den hem de Chinstrap'ten farklıdır. Ancak Adelie ve Chinstrap'in vücut ağırlığı ortalamaları arasında istatistiksel olarak anlamlı bir fark yoktur.
+
+
+
+
+
+Çözümlenen Diğer Testler
+Levene Testi (Varyans Homojenliği): p-value: 0.006445 **. P-değeri 0.05'ten küçüktür. Bu, varyans homojenliği varsayımının bozulduğu anlamına gelir. 
+
+Kruskal-Wallis Testi: Varsayım bozulduğu için yapılan non-parametrik karşılığıdır. Sonuç yine anlamlı fark olduğunu gösterir. 
+
+Dunn Testi: Kruskal-Wallis sonrası hangi çiftler arasında fark olduğunu gösterir. Tukey HSD ile aynı sonuca ulaşır (Gentoo, diğer ikisinden farklıdır)
+
+
+
+
+
+
+
+
+
+
+ Eğer varsayımlar bozuluyorsa: → Kruskal-Wallis + Dunn/Conover benzeri post-hoc (rstatix ile Dunn).
+ 
+```{r}
+# Kruskal-Wallis
+kruskal.test(body_mass_g ~ species, data = penguins_mass)
+```
+```{r}
+# Dunn testi (ikili karşılaştırmalar, p-düzeltmeli)
+penguins_mass %>%
+ dunn_test(body_mass_g ~ species, p.adjust.method = "bonferroni")
+```
+ 
+Diğer sayısal değişkenler için aynı yapıyı otomatikleştirmek,
+```{r}
+continuous_vars <- c("bill_length_mm", "bill_depth_mm",
+ "flipper_length_mm", "body_mass_g")
+results_anova <- list()
+results_kw <- list()
+for (v in continuous_vars) {
+ dat <- penguins %>%
+ select(species, all_of(v)) %>%
+ drop_na()
+
+ # ANOVA
+ aov_model <- aov(as.formula(paste(v, "~ species")), data = dat)
+ anova_res <- summary(aov_model)
+
+ # Normallik (artıklar)
+ shap <- shapiro.test(residuals(aov_model))
+
+ # Levene
+ lev <- car::leveneTest(as.formula(paste(v, "~ species")), data = dat)
+
+ results_anova[[v]] <- list(
+ anova = anova_res,
+ shapiro = shap,
+ levene = lev
+ )
+
+ # Varsayımlar ciddi bozuluyorsa Kruskal
+ # Burada basitçe her değişken için Kruskal da hesaplayalım
+ kw <- kruskal.test(as.formula(paste(v, "~ species")), data = dat)
+ results_kw[[v]] <- kw
+}
+# Örneğin body_mass_g sonuçlarına bakmak için:
+results_anova[["body_mass_g"]]
+```
+
+```{r}
+results_kw[["body_mass_g"]]
+
+```
+Türler arası kategorik karşılaştırmalar için (örneğin tür x cinsiyet) ki-kare
+```{r}
+# Tür x Cinsiyet - Ki-kare testi
+tbl_sex_species <- penguins %>%
+ select(species, sex) %>%
+ drop_na() %>%
+ table()
+chisq.test(tbl_sex_species)
+```
+
+ 
+ 
+ 
+ 
+ 📝 Bir Sonraki Data Seti İçin Notlar ve Çıkarımlar
+ 
+ 
+
+| Aşama | Ne Öğrendik? (Çıkarım) | Bir Sonraki Projede Ne Yapmalıyız? (Eylem) |
+| :--- | :--- | :--- |
+| **EDA (Keşifçi Analiz)** | Verinin bimodal (iki tepeli) dağılımları olduğunu gördük. Bunun, penguen türlerinden kaynaklandığını anladık. | Her zaman verinin dağılımına bakın (`skim`, `histogram`). Dağılımdaki anormallikler (birden fazla tepe, aşırı çarpıklık) her zaman verideki gizli gruplara işaret eder. |
+
+
+| **Kayıp Veri** | Sadece 2 gözlemde (toplamın %0.58'i) aynı anda eksik olduğunu gördük. | Kayıp verinin yapısını her zaman kontrol edin (`VIM::aggr`). Eğer az ve MCAR ise, `drop_na()` ile atmak en kolay ve güvenilir yoldur. |
+
+
+| **Sınıflandırma** | `body_mass_g`, `flipper_length_mm` ve Ada (`island`) değişkenleri, türleri ayırt etmek için en güçlü değişkenlerdir. | Sınıflandırma modelleri kurmadan önce, `ggpairs` ve tür bazlı boxplot/yoğunluk grafikleri ile en güçlü ayırıcı değişkenleri belirleyin. |
+
+
+| **Regresyon (VIF)** | Çoklu regresyonun açıklama gücü (%84.7), basit modelden (%75.9) daha yüksektir. Ancak VIF değerleri çoklu doğrusal bağlantı uyarısı veriyor. | Yüksek VIF veren değişkenlerden birini (örneğin `flipper_length_mm` veya `body_mass_g`) modelden çıkarmayı deneyerek modelin kararlılığını test edin. |
+
+
+| **İstatistiksel Testler**| ANOVA ile ortalamalar arasında fark olduğunu bulduk, ancak varyans homojenliği varsayımı bozuldu. | Varsayımlar bozulduğunda her zaman non-parametrik bir test (`Kruskal-Wallis`) yapmaya ve sonuçları karşılaştırmaya hazır olun. |
+ 
+ 
+ 
